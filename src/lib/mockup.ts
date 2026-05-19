@@ -1,21 +1,61 @@
 'use client';
 
-import type { Order, SignageTypeSlug } from './types';
+import type { BusinessType, City, Order, SignageTypeSlug } from './types';
+
+export type MockupResult = {
+  dataUrl: string;
+  source: 'ai' | 'canvas';
+};
 
 /**
- * Render a signage mockup over the customer's facade photo using a 2D canvas.
+ * Generate a signage mockup. Tries Cloudflare Workers AI (Flux-1-schnell) via
+ * our `/api/mockup` route first; falls back to a 2D-canvas composite over the
+ * customer's facade photo if the AI is unavailable / errors out.
  *
- * This is the free, instant, always-works default. A real model
- * (SDXL+ControlNet via Replicate / fal.ai / a local HF Inference call) can be
- * plugged in by adding a branch above that returns a different data URL — the
- * caller treats this as an opaque adapter that returns a PNG data URL.
+ * The AI branch returns a fully generated storefront *scene* (Flux is
+ * text-to-image, not image-to-image). The canvas branch overlays text onto
+ * the user's actual photo. Both produce a PNG/JPEG data URL.
  */
 export async function generateMockup(
   facadeDataUrl: string,
   spec: Pick<
     Order,
-    'business_name' | 'signage_slug' | 'illuminated' | 'style_prefs'
+    'business_name' | 'signage_slug' | 'illuminated' | 'style_prefs' | 'business_type' | 'city_slug'
   >,
+): Promise<MockupResult> {
+  // Try the real AI first.
+  try {
+    const res = await fetch('/api/mockup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        business_name: spec.business_name || 'Brand',
+        business_type: spec.business_type,
+        signage_slug: spec.signage_slug,
+        city_slug: spec.city_slug,
+        illuminated: !!spec.illuminated,
+        style_prefs: spec.style_prefs ?? undefined,
+      }),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { dataUrl?: string };
+      if (json.dataUrl) {
+        return { dataUrl: json.dataUrl, source: 'ai' };
+      }
+    }
+  } catch {
+    // fall through to canvas
+  }
+
+  return {
+    dataUrl: await canvasComposite(facadeDataUrl, spec),
+    source: 'canvas',
+  };
+}
+
+async function canvasComposite(
+  facadeDataUrl: string,
+  spec: Pick<Order, 'business_name' | 'signage_slug' | 'illuminated' | 'style_prefs'>,
 ): Promise<string> {
   const img = await loadImage(facadeDataUrl);
   const targetWidth = Math.min(1280, img.naturalWidth);

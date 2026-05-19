@@ -46,6 +46,7 @@ export function OrderWizard() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [mockupSource, setMockupSource] = useState<'ai' | 'canvas' | null>(null);
 
   const [form, setForm] = useState<FormState>({
     business_name: '',
@@ -84,13 +85,16 @@ export function OrderWizard() {
     if (!form.facadeDataUrl) return;
     setGenerating(true);
     try {
-      const url = await generateMockup(form.facadeDataUrl, {
+      const result = await generateMockup(form.facadeDataUrl, {
         business_name: form.business_name || 'Brand',
+        business_type: form.business_type,
         signage_slug: form.signage_slug,
+        city_slug: form.city_slug,
         illuminated: form.illuminated,
         style_prefs: form.style_prefs,
       });
-      update('mockup_data_url', url);
+      update('mockup_data_url', result.dataUrl);
+      setMockupSource(result.source);
     } finally {
       setGenerating(false);
     }
@@ -277,11 +281,40 @@ export function OrderWizard() {
               </div>
             ) : form.mockup_data_url ? (
               <div>
-                <img
-                  src={form.mockup_data_url}
-                  alt=""
-                  className="mx-auto max-h-[480px] rounded-xl shadow"
-                />
+                <div className="mb-3 flex flex-wrap items-center justify-center gap-2 text-xs">
+                  {mockupSource === 'ai' && (
+                    <span className="rounded-full bg-brand-100 px-2.5 py-0.5 font-semibold text-brand-700">
+                      ✨ Flux-1-schnell · Cloudflare Workers AI
+                    </span>
+                  )}
+                  {mockupSource === 'canvas' && (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-700">
+                      Локальный композит (AI недоступен)
+                    </span>
+                  )}
+                </div>
+                {form.facadeDataUrl && mockupSource === 'ai' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                        AI-макет
+                      </p>
+                      <img src={form.mockup_data_url} alt="" className="w-full rounded-lg shadow" />
+                    </div>
+                    <div>
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                        Ваше фото
+                      </p>
+                      <img src={form.facadeDataUrl} alt="" className="w-full rounded-lg shadow" />
+                    </div>
+                  </div>
+                ) : (
+                  <img
+                    src={form.mockup_data_url}
+                    alt=""
+                    className="mx-auto max-h-[480px] rounded-xl shadow"
+                  />
+                )}
                 <div className="mt-4 flex justify-center">
                   <button className="btn-secondary" onClick={doGenerate}>
                     {t('regenerate')}
