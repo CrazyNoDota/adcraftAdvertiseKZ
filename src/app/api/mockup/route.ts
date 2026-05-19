@@ -22,7 +22,10 @@ const SIZE = (process.env.OPENAI_IMAGE_SIZE || '1024x1024') as
   | '1024x1536'
   | '1536x1024'
   | 'auto';
-const QUALITY = (process.env.OPENAI_IMAGE_QUALITY || 'high') as
+// "medium" finishes in ~15-25s on gpt-image-1 — fits comfortably inside the
+// 60s Vercel Hobby-plan function timeout. Bump to "high" if you're on Pro
+// (and bump maxDuration too).
+const QUALITY = (process.env.OPENAI_IMAGE_QUALITY || 'medium') as
   | 'low'
   | 'medium'
   | 'high'
