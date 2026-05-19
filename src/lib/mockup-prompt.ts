@@ -1,37 +1,36 @@
 import type { BusinessType, City, SignageTypeSlug } from './types';
 
 /**
- * Turn a structured order spec into a Flux-friendly photographic prompt.
- *
- * Flux-1-schnell is text-to-image only — it can't paint onto the customer's
- * actual photo. Instead we generate a beautiful storefront *scene* that
- * matches their spec, and show their original photo separately as reference.
+ * Build a Flux-friendly prompt that asks for a realistic storefront with a
+ * BLANK signage area. The customer's actual business name is overlaid onto
+ * the returned image client-side — Flux can't reliably render text
+ * (especially Cyrillic), so we never let it try.
  */
 
 const BUSINESS_SCENE: Record<BusinessType, string> = {
-  cafe: 'a small modern cafe storefront with warm interior light spilling through large glass windows',
-  shop: 'a tidy small retail shop storefront with a clean entrance and front display window',
-  salon: 'an upscale beauty salon storefront with minimalist glass facade',
-  pharmacy: 'a corner pharmacy storefront with a clean white facade and large glass door',
-  office: 'a small ground-floor office storefront in a modern commercial building',
-  other: 'a small modern commercial storefront with a tidy facade and front entrance',
+  cafe: 'a small neighborhood cafe storefront, ground floor, large windows, simple plastered facade',
+  shop: 'a small neighborhood retail shop storefront, ground floor, plain plastered facade, a single front door and a window',
+  salon: 'a small beauty salon storefront, ground floor, glass facade, simple modern entrance',
+  pharmacy: 'a small corner pharmacy storefront, ground floor, simple white-painted facade, large glass door',
+  office: 'a small ground-floor office entrance in a low-rise commercial building, plain facade',
+  other: 'a small ground-floor commercial storefront with a simple plastered facade and a front entrance',
 };
 
 const SIGNAGE_DESC: Record<SignageTypeSlug, string> = {
-  lightbox: 'a clean white acrylic lightbox sign with crisp dark lettering',
-  channel_letters: 'polished metal channel-letter signage with subtle LED halo backlight',
-  flat_panel: 'a flat aluminum composite signboard with clean modern typography',
-  illuminated: 'an illuminated signboard with a soft warm internal glow',
-  neon: 'an elegant single-stroke neon sign with a soft pink-violet glow',
-  banner: 'a tight, well-printed fabric banner mounted flush above the entrance',
+  lightbox: 'a clean rectangular white acrylic lightbox sign panel',
+  channel_letters: 'a flat dark backing plate for channel-letter signage, mounted above the entrance',
+  flat_panel: 'a flat aluminum composite signboard panel',
+  illuminated: 'a clean illuminated signboard panel with a soft internal glow',
+  neon: 'a neon-style signboard area with a soft warm glow halo',
+  banner: 'a tightly stretched fabric banner mounted flush above the entrance',
 };
 
 const CITY_HINT: Partial<Record<City['slug'], string>> = {
-  almaty: 'Almaty Kazakhstan, soft golden hour mountain light',
-  astana: 'Astana Kazakhstan, clean overcast daylight, contemporary district',
-  shymkent: 'Shymkent Kazakhstan, warm afternoon light',
-  karaganda: 'Karaganda Kazakhstan, soft daylight',
-  aktobe: 'Aktobe Kazakhstan, soft daylight',
+  almaty: 'Almaty, Kazakhstan, post-Soviet city street',
+  astana: 'Astana, Kazakhstan, modern post-Soviet city',
+  shymkent: 'Shymkent, Kazakhstan, warm afternoon light',
+  karaganda: 'Karaganda, Kazakhstan',
+  aktobe: 'Aktobe, Kazakhstan',
 };
 
 export type MockupPromptInput = {
@@ -50,20 +49,23 @@ export function buildPrompt(input: MockupPromptInput): string {
     input.signage_slug === 'lightbox' ||
     input.signage_slug === 'neon' ||
     input.signage_slug === 'illuminated';
-  const lighting = input.illuminated || isInherentlyLit
-    ? 'early evening blue hour, the sign clearly glowing, warm reflections on the pavement,'
-    : 'soft daylight,';
+  const lit = input.illuminated || isInherentlyLit;
+  const lighting = lit
+    ? 'early evening, the sign panel softly glowing'
+    : 'natural daylight, overcast soft light';
   const city = CITY_HINT[input.city_slug] ?? '';
-  const name = (input.business_name || 'BRAND').trim();
   const style = input.style_prefs?.trim()
-    ? `Style direction: ${input.style_prefs.trim()}.`
+    ? `Style note: ${input.style_prefs.trim()}.`
     : '';
 
+  // The strong anti-text language repeats deliberately — Flux is very prone
+  // to hallucinating gibberish letters on any sign-shaped surface.
   return [
-    `Realistic editorial photograph of ${scene}.`,
-    `${sign} mounted above the entrance reading "${name}" in clean professional typography.`,
-    `${lighting} ${city}.`,
-    'Cinematic color grade, shot on a 35mm prime at f/2.8, shallow depth of field, no people in frame, sharp focus on the signage, tasteful commercial photography aesthetic.',
+    `Realistic documentary photograph of ${scene}.`,
+    `Mounted above the entrance: ${sign}.`,
+    'The sign panel is completely BLANK — no text, no letters, no writing, no logos, no symbols, no characters, just a clean empty unmarked surface ready for branding.',
+    `${lighting}, ${city}.`,
+    'Plain real-world setting, ordinary sidewalk, natural imperfections in the wall surface, mid-day or evening street photography.',
     style,
   ]
     .filter(Boolean)

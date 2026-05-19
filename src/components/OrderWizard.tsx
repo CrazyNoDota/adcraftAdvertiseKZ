@@ -81,6 +81,8 @@ export function OrderWizard() {
     update('facadeDataUrl', dataUrl);
   }
 
+  const [facadeComposite, setFacadeComposite] = useState<string | null>(null);
+
   async function doGenerate() {
     if (!form.facadeDataUrl) return;
     setGenerating(true);
@@ -93,7 +95,8 @@ export function OrderWizard() {
         illuminated: form.illuminated,
         style_prefs: form.style_prefs,
       });
-      update('mockup_data_url', result.dataUrl);
+      update('mockup_data_url', result.primaryDataUrl);
+      setFacadeComposite(result.facadeCompositeDataUrl);
       setMockupSource(result.source);
     } finally {
       setGenerating(false);
@@ -282,32 +285,36 @@ export function OrderWizard() {
             ) : form.mockup_data_url ? (
               <div>
                 <div className="mb-3 flex flex-wrap items-center justify-center gap-2 text-xs">
-                  {mockupSource === 'ai' && (
+                  {mockupSource === 'ai' ? (
                     <span className="rounded-full bg-brand-100 px-2.5 py-0.5 font-semibold text-brand-700">
                       ✨ Flux-1-schnell · Cloudflare Workers AI
                     </span>
-                  )}
-                  {mockupSource === 'canvas' && (
+                  ) : (
                     <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-700">
                       Локальный композит (AI недоступен)
                     </span>
                   )}
                 </div>
-                {form.facadeDataUrl && mockupSource === 'ai' ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                        AI-макет
-                      </p>
-                      <img src={form.mockup_data_url} alt="" className="w-full rounded-lg shadow" />
+                {mockupSource === 'ai' && facadeComposite ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <figure>
+                        <figcaption className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                          На вашем фасаде
+                        </figcaption>
+                        <img src={facadeComposite} alt="" className="w-full rounded-lg shadow" />
+                      </figure>
+                      <figure>
+                        <figcaption className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                          Стилистический референс (AI)
+                        </figcaption>
+                        <img src={form.mockup_data_url} alt="" className="w-full rounded-lg shadow" />
+                      </figure>
                     </div>
-                    <div>
-                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                        Ваше фото
-                      </p>
-                      <img src={form.facadeDataUrl} alt="" className="w-full rounded-lg shadow" />
-                    </div>
-                  </div>
+                    <p className="mt-2 text-center text-[11px] text-slate-500">
+                      Левое изображение — реальный композит на вашем здании. Правое — AI-референс стиля и подсветки для агентства.
+                    </p>
+                  </>
                 ) : (
                   <img
                     src={form.mockup_data_url}
