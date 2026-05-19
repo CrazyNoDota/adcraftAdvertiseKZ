@@ -1,39 +1,43 @@
 import type { BusinessType, City, SignageTypeSlug } from './types';
 
 /**
- * Build a Flux-friendly prompt that asks for a realistic storefront with a
- * BLANK signage area. The customer's actual business name is overlaid onto
- * the returned image client-side — Flux can't reliably render text
- * (especially Cyrillic), so we never let it try.
+ * Build a natural-language instruction for an image-edit model (OpenAI
+ * gpt-image-1, Gemini 2.5 Flash Image, Flux Kontext, etc.) that takes the
+ * customer's actual facade photo and asks for a believable signage edit.
+ *
+ * The instruction:
+ *   1. Tells the model to keep the building intact
+ *   2. Describes the sign type, placement, lighting integration
+ *   3. Spells out the exact lettering (with Cyrillic when applicable)
+ *   4. Forbids invented logos or extra text
  */
 
-const BUSINESS_SCENE: Record<BusinessType, string> = {
-  cafe: 'a small neighborhood cafe storefront, ground floor, large windows, simple plastered facade',
-  shop: 'a small neighborhood retail shop storefront, ground floor, plain plastered facade, a single front door and a window',
-  salon: 'a small beauty salon storefront, ground floor, glass facade, simple modern entrance',
-  pharmacy: 'a small corner pharmacy storefront, ground floor, simple white-painted facade, large glass door',
-  office: 'a small ground-floor office entrance in a low-rise commercial building, plain facade',
-  other: 'a small ground-floor commercial storefront with a simple plastered facade and a front entrance',
-};
-
 const SIGNAGE_DESC: Record<SignageTypeSlug, string> = {
-  lightbox: 'a clean rectangular white acrylic lightbox sign panel',
-  channel_letters: 'a flat dark backing plate for channel-letter signage, mounted above the entrance',
-  flat_panel: 'a flat aluminum composite signboard panel',
-  illuminated: 'a clean illuminated signboard panel with a soft internal glow',
-  neon: 'a neon-style signboard area with a soft warm glow halo',
+  lightbox: 'a clean rectangular white acrylic lightbox sign with crisp dark lettering, mounted flush above the entrance',
+  channel_letters: 'polished metal channel letters with subtle LED halo backlight, mounted directly on the wall above the entrance',
+  flat_panel: 'a flat aluminum composite signboard with clean modern typography, mounted flush above the entrance',
+  illuminated: 'an illuminated signboard panel with a soft warm internal glow, mounted above the entrance',
+  neon: 'an elegant single-stroke neon sign with a soft glow, mounted above the entrance',
   banner: 'a tightly stretched fabric banner mounted flush above the entrance',
 };
 
+const BUSINESS_CONTEXT: Partial<Record<BusinessType, string>> = {
+  cafe: 'cafe / coffee shop',
+  shop: 'retail shop',
+  salon: 'beauty salon',
+  pharmacy: 'pharmacy',
+  office: 'small office',
+};
+
 const CITY_HINT: Partial<Record<City['slug'], string>> = {
-  almaty: 'Almaty, Kazakhstan, post-Soviet city street',
-  astana: 'Astana, Kazakhstan, modern post-Soviet city',
-  shymkent: 'Shymkent, Kazakhstan, warm afternoon light',
+  almaty: 'Almaty, Kazakhstan',
+  astana: 'Astana, Kazakhstan',
+  shymkent: 'Shymkent, Kazakhstan',
   karaganda: 'Karaganda, Kazakhstan',
   aktobe: 'Aktobe, Kazakhstan',
 };
 
-export type MockupPromptInput = {
+export type PromptInput = {
   business_name: string;
   business_type: BusinessType;
   signage_slug: SignageTypeSlug;
@@ -42,30 +46,30 @@ export type MockupPromptInput = {
   style_prefs?: string;
 };
 
-export function buildPrompt(input: MockupPromptInput): string {
-  const scene = BUSINESS_SCENE[input.business_type] ?? BUSINESS_SCENE.other;
+export function buildEditInstruction(input: PromptInput): string {
   const sign = SIGNAGE_DESC[input.signage_slug];
+  const biz = BUSINESS_CONTEXT[input.business_type] ?? 'small business';
+  const city = CITY_HINT[input.city_slug] ?? '';
   const isInherentlyLit =
     input.signage_slug === 'lightbox' ||
     input.signage_slug === 'neon' ||
     input.signage_slug === 'illuminated';
-  const lit = input.illuminated || isInherentlyLit;
-  const lighting = lit
-    ? 'early evening, the sign panel softly glowing'
-    : 'natural daylight, overcast soft light';
-  const city = CITY_HINT[input.city_slug] ?? '';
+  const lit = input.illuminated || isInherentlyLit
+    ? 'The sign is illuminated and clearly glowing.'
+    : 'The sign is not illuminated.';
   const style = input.style_prefs?.trim()
-    ? `Style note: ${input.style_prefs.trim()}.`
+    ? `Style direction: ${input.style_prefs.trim()}.`
     : '';
+  const name = (input.business_name || 'Brand').trim();
 
-  // The strong anti-text language repeats deliberately — Flux is very prone
-  // to hallucinating gibberish letters on any sign-shaped surface.
   return [
-    `Realistic documentary photograph of ${scene}.`,
-    `Mounted above the entrance: ${sign}.`,
-    'The sign panel is completely BLANK — no text, no letters, no writing, no logos, no symbols, no characters, just a clean empty unmarked surface ready for branding.',
-    `${lighting}, ${city}.`,
-    'Plain real-world setting, ordinary sidewalk, natural imperfections in the wall surface, mid-day or evening street photography.',
+    `Edit this photograph of a storefront facade in ${city || 'Kazakhstan'} for a ${biz} business.`,
+    `Add ${sign}.`,
+    `The sign must display exactly this text and nothing else: «${name}». Render the text precisely, character by character, including any Cyrillic letters. Do not invent additional words, taglines, logos, or symbols.`,
+    lit,
+    'Integrate the sign naturally: follow the perspective of the wall, match the existing lighting direction and color temperature, cast a subtle realistic shadow onto the facade.',
+    'Keep the rest of the building, the surroundings, the windows, the doors, the sidewalk, the sky, and any existing people or objects completely unchanged — pixel-for-pixel identical wherever possible.',
+    'The result must look like a real photograph of the same building with the new sign professionally installed, not a digital collage.',
     style,
   ]
     .filter(Boolean)

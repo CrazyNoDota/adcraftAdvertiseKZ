@@ -12,6 +12,7 @@ import {
 } from '@/lib/seed';
 import { calculate, formatKZT } from '@/lib/pricing';
 import { compressToDataUrl, generateMockup } from '@/lib/mockup';
+import { SignPlacer } from '@/components/SignPlacer';
 import { createOrder, simulateIncomingBids } from '@/lib/store';
 import type {
   BusinessType,
@@ -47,6 +48,7 @@ export function OrderWizard() {
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [mockupSource, setMockupSource] = useState<'ai' | 'canvas' | null>(null);
+  const [previewMode, setPreviewMode] = useState<'ai' | 'manual'>('ai');
 
   const [form, setForm] = useState<FormState>({
     business_name: '',
@@ -286,44 +288,63 @@ export function OrderWizard() {
               <div>
                 <div className="mb-3 flex flex-wrap items-center justify-center gap-2 text-xs">
                   {mockupSource === 'ai' ? (
-                    <span className="rounded-full bg-brand-100 px-2.5 py-0.5 font-semibold text-brand-700">
-                      ✨ Flux-1-schnell · Cloudflare Workers AI
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 font-semibold text-emerald-700">
+                      ✨ AI-рендер на вашем фасаде
                     </span>
                   ) : (
                     <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-700">
-                      Локальный композит (AI недоступен)
+                      Ручной композит (AI недоступен)
                     </span>
                   )}
-                </div>
-                {mockupSource === 'ai' && facadeComposite ? (
-                  <>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <figure>
-                        <figcaption className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                          На вашем фасаде
-                        </figcaption>
-                        <img src={facadeComposite} alt="" className="w-full rounded-lg shadow" />
-                      </figure>
-                      <figure>
-                        <figcaption className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                          Стилистический референс (AI)
-                        </figcaption>
-                        <img src={form.mockup_data_url} alt="" className="w-full rounded-lg shadow" />
-                      </figure>
+                  {form.facadeDataUrl && (
+                    <div className="ml-2 inline-flex overflow-hidden rounded-full border border-slate-200 bg-white text-[11px]">
+                      <button
+                        onClick={() => setPreviewMode('ai')}
+                        className={`px-2.5 py-0.5 ${previewMode === 'ai' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}
+                      >
+                        AI-рендер
+                      </button>
+                      <button
+                        onClick={() => setPreviewMode('manual')}
+                        className={`px-2.5 py-0.5 ${previewMode === 'manual' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}
+                      >
+                        Подвинуть вручную
+                      </button>
                     </div>
+                  )}
+                </div>
+
+                {previewMode === 'manual' && form.facadeDataUrl ? (
+                  <>
+                    <SignPlacer
+                      facadeDataUrl={form.facadeDataUrl}
+                      spec={{
+                        business_name: form.business_name || 'Brand',
+                        business_type: form.business_type,
+                        city_slug: form.city_slug,
+                        signage_slug: form.signage_slug,
+                        illuminated: form.illuminated,
+                        style_prefs: form.style_prefs,
+                      }}
+                      onChange={(dataUrl) => {
+                        setFacadeComposite(dataUrl);
+                        update('mockup_data_url', dataUrl);
+                      }}
+                    />
                     <p className="mt-2 text-center text-[11px] text-slate-500">
-                      Левое изображение — реальный композит на вашем здании. Правое — AI-референс стиля и подсветки для агентства.
+                      Перетащите вывеску и потяните за уголок ⤡ — изменения сохраняются автоматически.
                     </p>
                   </>
                 ) : (
                   <img
                     src={form.mockup_data_url}
                     alt=""
-                    className="mx-auto max-h-[480px] rounded-xl shadow"
+                    className="mx-auto max-h-[520px] rounded-xl shadow"
                   />
                 )}
-                <div className="mt-4 flex justify-center">
-                  <button className="btn-secondary" onClick={doGenerate}>
+
+                <div className="mt-4 flex justify-center gap-2">
+                  <button className="btn-secondary" onClick={doGenerate} disabled={generating}>
                     {t('regenerate')}
                   </button>
                 </div>

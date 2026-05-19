@@ -13,12 +13,11 @@ export type MockupSpec = Pick<
 >;
 
 export type MockupResult = {
-  /** Primary mockup. If AI worked → the AI scene with the business name
-   *  overlaid. If AI failed → a canvas composite over the user's photo. */
+  /** AI-edited photo (user's facade with the sign on it) when AI works,
+   *  otherwise a canvas composite with text overlaid at a default position. */
   primaryDataUrl: string;
-  /** Always a canvas composite over the user's actual facade photo, so the
-   *  customer can see "what their building would look like" regardless of
-   *  whether AI worked. */
+  /** Always provided: the canvas composite. Useful as a "draggable" base if
+   *  the user wants to fine-tune the placement. */
   facadeCompositeDataUrl: string;
   source: 'ai' | 'canvas';
 };
@@ -27,12 +26,15 @@ export async function generateMockup(
   facadeDataUrl: string,
   spec: MockupSpec,
 ): Promise<MockupResult> {
-  // Always compute the facade composite — it's instant, free, accurate to the
-  // user's actual building.
-  const facadeComposite = await canvasCompositeOnPhoto(facadeDataUrl, spec);
+  // Always compute a canvas composite — instant + reliable fallback.
+  const facadeComposite = await canvasCompositeOnPhoto(facadeDataUrl, spec, {
+    xPct: 0.5,
+    yPct: 0.22,
+    widthPct: 0.7,
+    heightPct: 0.13,
+  });
 
-  // Try Flux for a styled "stylistic reference" scene.
-  let aiSceneDataUrl: string | null = null;
+  // Try AI image edit.
   try {
     const res = await fetch('/api/mockup', {
       method: 'POST',
@@ -44,25 +46,21 @@ export async function generateMockup(
         city_slug: spec.city_slug,
         illuminated: !!spec.illuminated,
         style_prefs: spec.style_prefs ?? undefined,
+        facade_data_url: facadeDataUrl,
       }),
     });
     if (res.ok) {
       const json = (await res.json()) as { dataUrl?: string };
-      if (json.dataUrl) aiSceneDataUrl = json.dataUrl;
+      if (json.dataUrl) {
+        return {
+          primaryDataUrl: json.dataUrl,
+          facadeCompositeDataUrl: facadeComposite,
+          source: 'ai',
+        };
+      }
     }
   } catch {
     /* fall through */
-  }
-
-  if (aiSceneDataUrl) {
-    // Flux was instructed to leave the signage blank. Now overlay the real
-    // business name so the text is always correct and Cyrillic-safe.
-    const aiWithName = await overlayBusinessName(aiSceneDataUrl, spec);
-    return {
-      primaryDataUrl: aiWithName,
-      facadeCompositeDataUrl: facadeComposite,
-      source: 'ai',
-    };
   }
 
   return {
@@ -73,13 +71,22 @@ export async function generateMockup(
 }
 
 // ============================================================================
-// Canvas helpers
+// Canvas composite (used for the always-instant preview and as fallback)
 // ============================================================================
 
-/** Overlay the business-name signage onto the user's actual facade photo. */
-async function canvasCompositeOnPhoto(
+export type SignPlacement = {
+  /** All normalized to image dimensions (0..1) so resizing the photo keeps
+   *  the sign at the same relative spot. */
+  xPct: number; // sign center x
+  yPct: number; // sign center y
+  widthPct: number;
+  heightPct: number;
+};
+
+export async function canvasCompositeOnPhoto(
   facadeDataUrl: string,
   spec: MockupSpec,
+  place: SignPlacement,
 ): Promise<string> {
   const img = await loadImage(facadeDataUrl);
   const targetWidth = Math.min(1280, img.naturalWidth);
@@ -93,40 +100,13 @@ async function canvasCompositeOnPhoto(
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(img, 0, 0, w, h);
 
-  // Slight darkening at top so the sign reads against any sky
-  const grad = ctx.createLinearGradient(0, 0, 0, h * 0.45);
-  grad.addColorStop(0, 'rgba(0,0,0,0.18)');
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h * 0.45);
-
-  drawSign(ctx, w, h, spec, 'photo');
+  drawSign(ctx, w, h, spec, place);
 
   ctx.font = `500 ${Math.round(h * 0.018)}px system-ui, sans-serif`;
   ctx.fillStyle = 'rgba(255,255,255,0.75)';
   ctx.textAlign = 'right';
-  ctx.fillText('AdvertMarket KZ · композит', w - 12, h - 10);
+  ctx.fillText('AdvertMarket KZ', w - 12, h - 10);
 
-  return canvas.toDataURL('image/jpeg', 0.9);
-}
-
-/** Overlay the business name onto an already-rendered AI scene. */
-async function overlayBusinessName(aiDataUrl: string, spec: MockupSpec): Promise<string> {
-  const img = await loadImage(aiDataUrl);
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(img, 0, 0, w, h);
-
-  drawSign(ctx, w, h, spec, 'ai');
-
-  ctx.font = `500 ${Math.round(h * 0.018)}px system-ui, sans-serif`;
-  ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  ctx.textAlign = 'right';
-  ctx.fillText('AdvertMarket KZ · AI mockup', w - 12, h - 10);
   return canvas.toDataURL('image/jpeg', 0.9);
 }
 
@@ -182,20 +162,16 @@ function drawSign(
   w: number,
   h: number,
   spec: MockupSpec,
-  mode: 'photo' | 'ai',
+  place: SignPlacement,
 ) {
   const style = STYLES[spec.signage_slug];
   const name = (spec.business_name || 'Ваш бренд').trim();
 
-  // For AI scenes we want the band to sit roughly where Flux was asked to
-  // leave a blank sign (upper third). For real facade photos we keep our
-  // long-standing position.
-  const bandY = Math.round(h * (mode === 'ai' ? 0.18 : 0.16));
-  const bandH = Math.round(h * (mode === 'ai' ? 0.12 : 0.13));
-  const bandW = Math.round(w * (mode === 'ai' ? 0.62 : 0.7));
-  const bandX = Math.round((w - bandW) / 2);
+  const bandW = Math.round(w * place.widthPct);
+  const bandH = Math.round(h * place.heightPct);
+  const bandX = Math.round(w * place.xPct - bandW / 2);
+  const bandY = Math.round(h * place.yPct - bandH / 2);
 
-  // Auto-fit font size to the actual text width
   const padX = bandW * 0.08;
   let fontSize = Math.round(bandH * 0.62);
   ctx.font = style.font.replace('{size}', String(fontSize));
@@ -263,7 +239,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 // ============================================================================
-// File helpers (used by the upload step)
+// File helpers
 // ============================================================================
 
 export async function compressToDataUrl(file: File, maxDim = 1600): Promise<string> {

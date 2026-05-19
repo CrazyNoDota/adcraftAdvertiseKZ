@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { buildPrompt } from '@/lib/mockup-prompt';
+import { buildEditInstruction } from '@/lib/mockup-prompt';
 
 export const runtime = 'nodejs';
-// Flux can take 8-15s; allow up to 60s on Vercel.
 export const maxDuration = 60;
 
 const BodySchema = z.object({
@@ -13,13 +12,25 @@ const BodySchema = z.object({
   city_slug: z.enum(['almaty', 'astana', 'shymkent', 'karaganda', 'aktobe']),
   illuminated: z.boolean(),
   style_prefs: z.string().max(300).optional(),
-  seed: z.number().int().optional(),
+  /** Data URL of the user's facade photo. */
+  facade_data_url: z.string().regex(/^data:image\/(jpeg|jpg|png|webp);base64,/),
 });
 
+const MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+const SIZE = (process.env.OPENAI_IMAGE_SIZE || '1024x1024') as
+  | '1024x1024'
+  | '1024x1536'
+  | '1536x1024'
+  | 'auto';
+const QUALITY = (process.env.OPENAI_IMAGE_QUALITY || 'high') as
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'auto';
+
 export async function POST(req: NextRequest) {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-  if (!accountId || !apiToken) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
     return NextResponse.json(
       { error: 'AI mockup is not configured on this deployment.' },
       { status: 503 },
@@ -30,53 +41,59 @@ export async function POST(req: NextRequest) {
   try {
     parsed = BodySchema.parse(await req.json());
   } catch (e) {
-    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Invalid request body.', detail: e instanceof Error ? e.message : 'unknown' },
+      { status: 400 },
+    );
   }
 
-  const prompt = buildPrompt(parsed);
-  const seed = parsed.seed ?? Math.floor(Math.random() * 1_000_000);
+  const prompt = buildEditInstruction(parsed);
 
-  const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
+  // Decode the data URL into a Blob for multipart upload.
+  const match = parsed.facade_data_url.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+  if (!match) {
+    return NextResponse.json({ error: 'Invalid facade image data URL.' }, { status: 400 });
+  }
+  const mime = match[1];
+  const buf = Buffer.from(match[2], 'base64');
+  const ext = mime.split('/')[1] === 'jpeg' ? 'jpg' : mime.split('/')[1];
 
-  let cfRes: Response;
+  const form = new FormData();
+  form.append('model', MODEL);
+  form.append('prompt', prompt);
+  form.append('size', SIZE);
+  form.append('quality', QUALITY);
+  form.append('n', '1');
+  form.append('image', new Blob([buf], { type: mime }), `facade.${ext}`);
+
+  let res: Response;
   try {
-    cfRes = await fetch(cfUrl, {
+    res = await fetch('https://api.openai.com/v1/images/edits', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ prompt, seed, steps: 4 }),
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
     });
   } catch (e) {
     return NextResponse.json({ error: 'Upstream AI request failed.' }, { status: 502 });
   }
 
-  if (!cfRes.ok) {
-    const text = await cfRes.text().catch(() => '');
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
     return NextResponse.json(
-      { error: `Cloudflare AI error (${cfRes.status}).`, detail: text.slice(0, 400) },
+      { error: `OpenAI error (${res.status}).`, detail: text.slice(0, 600) },
       { status: 502 },
     );
   }
 
-  const payload = (await cfRes.json()) as {
-    result?: { image?: string };
-    success?: boolean;
-    errors?: unknown;
-  };
-  const base64 = payload.result?.image;
-  if (!base64) {
-    return NextResponse.json(
-      { error: 'Cloudflare response missing image.', detail: JSON.stringify(payload.errors)?.slice(0, 400) },
-      { status: 502 },
-    );
+  const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
+  const b64 = json.data?.[0]?.b64_json;
+  if (!b64) {
+    return NextResponse.json({ error: 'OpenAI response missing image.' }, { status: 502 });
   }
 
   return NextResponse.json({
-    dataUrl: `data:image/jpeg;base64,${base64}`,
+    dataUrl: `data:image/png;base64,${b64}`,
     prompt,
-    seed,
-    model: '@cf/black-forest-labs/flux-1-schnell',
+    model: MODEL,
   });
 }
