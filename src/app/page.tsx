@@ -151,15 +151,15 @@ function AgenciesStrip({ label }: { label: string }) {
         </p>
         <Marquee>
           {siteImages.agencies.map((src, i) => (
-            <div key={i} className="flex h-10 w-32 items-center justify-center opacity-60 grayscale transition hover:opacity-100 hover:grayscale-0">
+            <div key={i} className="flex h-14 w-36 items-center justify-center opacity-80 transition hover:opacity-100">
               <SafeImage
                 src={src}
                 alt=""
-                className="max-h-10 w-auto object-contain"
+                className="max-h-14 w-auto object-contain"
                 tone="mono"
                 fallback={
                   <span className="text-sm font-bold tracking-tight text-slate-400">
-                    {src.split('/').pop()?.replace('.png', '').toUpperCase()}
+                    {src.split('/').pop()?.replace(/\.(webp|png|jpg)$/, '').toUpperCase()}
                   </span>
                 }
               />
