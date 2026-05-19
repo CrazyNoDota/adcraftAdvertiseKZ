@@ -20,6 +20,11 @@ export type MockupResult = {
    *  the user wants to fine-tune the placement. */
   facadeCompositeDataUrl: string;
   source: 'ai' | 'canvas';
+  /** Set when the AI tier returned a 429 (or other refusal) and we silently
+   *  fell back. Lets the UI explain why the user sees the canvas version. */
+  fallbackReason?:
+    | { kind: 'rate_limited'; message: string; resetAt: number }
+    | { kind: 'error'; message: string };
 };
 
 export async function generateMockup(
@@ -35,6 +40,7 @@ export async function generateMockup(
   });
 
   // Try AI image edit.
+  let fallbackReason: MockupResult['fallbackReason'];
   try {
     const res = await fetch('/api/mockup', {
       method: 'POST',
@@ -58,15 +64,31 @@ export async function generateMockup(
           source: 'ai',
         };
       }
+    } else if (res.status === 429) {
+      const j = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        reset_at?: number;
+      };
+      fallbackReason = {
+        kind: 'rate_limited',
+        message: j.message || 'Лимит AI-генераций исчерпан.',
+        resetAt: j.reset_at || Date.now() + 3 * 60 * 60 * 1000,
+      };
+    } else {
+      fallbackReason = { kind: 'error', message: `AI вернул ${res.status}` };
     }
-  } catch {
-    /* fall through */
+  } catch (e) {
+    fallbackReason = {
+      kind: 'error',
+      message: e instanceof Error ? e.message : 'AI недоступен',
+    };
   }
 
   return {
     primaryDataUrl: facadeComposite,
     facadeCompositeDataUrl: facadeComposite,
     source: 'canvas',
+    fallbackReason,
   };
 }
 

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { buildEditInstruction } from '@/lib/mockup-prompt';
+import {
+  ADMIN_COOKIE,
+  RATELIMIT_COOKIE,
+  clientIp,
+  consume,
+  isAdmin,
+} from '@/lib/ratelimit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -38,6 +45,31 @@ export async function POST(req: NextRequest) {
       { error: 'AI mockup is not configured on this deployment.' },
       { status: 503 },
     );
+  }
+
+  // Admin bypass: signed cookie from /api/admin/login.
+  const adminCookie = req.cookies.get(ADMIN_COOKIE)?.value;
+  const admin = isAdmin(adminCookie);
+
+  // Rate limit (skipped for admin).
+  let rateCookieToSet: string | null = null;
+  if (!admin) {
+    const quotaCookie = req.cookies.get(RATELIMIT_COOKIE)?.value;
+    const check = consume(quotaCookie, clientIp(req));
+    if (!check.ok) {
+      const retrySec = Math.ceil(check.retryAfterMs / 1000);
+      const res = NextResponse.json(
+        {
+          error: 'rate_limited',
+          message: 'Достигнут лимит бесплатных AI-генераций (2 за 3 часа).',
+          retry_after_seconds: retrySec,
+          reset_at: check.resetAt,
+        },
+        { status: 429, headers: { 'Retry-After': String(retrySec) } },
+      );
+      return res;
+    }
+    rateCookieToSet = check.cookie;
   }
 
   let parsed: z.infer<typeof BodySchema>;
@@ -94,9 +126,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'OpenAI response missing image.' }, { status: 502 });
   }
 
-  return NextResponse.json({
+  const out = NextResponse.json({
     dataUrl: `data:image/png;base64,${b64}`,
     prompt,
     model: MODEL,
+    admin,
   });
+  if (rateCookieToSet) {
+    out.cookies.set(RATELIMIT_COOKIE, rateCookieToSet, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7,
+    });
+  }
+  return out;
 }

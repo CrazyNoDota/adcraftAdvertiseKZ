@@ -49,6 +49,7 @@ export function OrderWizard() {
   const [publishing, setPublishing] = useState(false);
   const [mockupSource, setMockupSource] = useState<'ai' | 'canvas' | null>(null);
   const [previewMode, setPreviewMode] = useState<'ai' | 'manual'>('ai');
+  const [rateLimited, setRateLimited] = useState<null | { message: string; resetAt: number }>(null);
 
   const [form, setForm] = useState<FormState>({
     business_name: '',
@@ -100,6 +101,17 @@ export function OrderWizard() {
       update('mockup_data_url', result.primaryDataUrl);
       setFacadeComposite(result.facadeCompositeDataUrl);
       setMockupSource(result.source);
+      if (result.fallbackReason?.kind === 'rate_limited') {
+        setRateLimited({
+          message: result.fallbackReason.message,
+          resetAt: result.fallbackReason.resetAt,
+        });
+      } else {
+        setRateLimited(null);
+      }
+      // If AI didn't work, take the user straight to the manual placer so
+      // they can do something meaningful right away.
+      setPreviewMode(result.source === 'ai' ? 'ai' : 'manual');
     } finally {
       setGenerating(false);
     }
@@ -286,6 +298,15 @@ export function OrderWizard() {
               </div>
             ) : form.mockup_data_url ? (
               <div>
+                {rateLimited && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    <p className="font-semibold">⏳ {rateLimited.message}</p>
+                    <p className="mt-1">
+                      Лимит сбросится: <span className="font-mono">{new Date(rateLimited.resetAt).toLocaleString('ru-KZ')}</span>.
+                      Пока вы можете настроить вывеску вручную ниже.
+                    </p>
+                  </div>
+                )}
                 <div className="mb-3 flex flex-wrap items-center justify-center gap-2 text-xs">
                   {mockupSource === 'ai' ? (
                     <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 font-semibold text-emerald-700">
@@ -293,7 +314,7 @@ export function OrderWizard() {
                     </span>
                   ) : (
                     <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-700">
-                      Ручной композит (AI недоступен)
+                      Ручной композит
                     </span>
                   )}
                   {form.facadeDataUrl && (
